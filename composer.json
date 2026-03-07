@@ -15,7 +15,9 @@
 	},
 	"require" : {
 		"php" : "^7.2 || ^8.0",
-		"contao/core-bundle" : "^4.9"
+		"contao/core-bundle" : "^4.9",
+		"setasign/fpdf" : "^1.8",
+		"setasign/fpdi" : "^2.6"
 	},
 	"autoload" : {
 		"psr-4" : {

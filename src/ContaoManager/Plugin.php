@@ -14,18 +14,18 @@ use Symfony\Component\Routing\RouteCollection;
 
 class Plugin implements BundlePluginInterface, RoutingPluginInterface
 {
-    public function getBundles(ParserInterface $parser)
+    public function getBundles(ParserInterface $parser): array
     {
         return [
             BundleConfig::create(PdfFillerBundle::class)
-            ->setLoadAfter([ContaoCoreBundle::class]),
+                ->setLoadAfter([ContaoCoreBundle::class]),
         ];
-        
     }
+
     public function getRouteCollection(LoaderResolverInterface $resolver, KernelInterface $kernel): ?RouteCollection
     {
         return $resolver
-        ->resolve(__DIR__ . '/../Resources/config/routes.yaml')
-        ->load(__DIR__ . '/../Resources/config/routes.yaml');
+            ->resolve(__DIR__ . '/../Resources/config/routes.yaml')
+            ->load(__DIR__ . '/../Resources/config/routes.yaml');
     }
 }
