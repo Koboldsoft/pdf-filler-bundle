@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Koboildsoft\PdfFillerBundle\Controller;
+namespace Koboldsoft\PdfFillerBundle\Controller;
 
 use Koboldsoft\PdfFillerBundle\Service\PdfOcrFiller;
 use Contao\CoreBundle\Framework\ContaoFramework;
