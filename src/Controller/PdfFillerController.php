@@ -31,7 +31,7 @@ class PdfFillerController extends AbstractController
     }
 
     /**
-     * @Route("/pdffiller/upload_afa", name="pdf_filler_upload", methods={"GET", "POST"})
+     * @Route("/pdffiller/upload_afa", name="pdf_filler_upload_afa", methods={"GET", "POST"})
      */
     public function uploadAfa(Request $request): Response
     {
@@ -485,7 +485,7 @@ class PdfFillerController extends AbstractController
     }
     
     /**
-     * @Route("/pdffiller/upload_jc", name="pdf_filler_upload", methods={"GET", "POST"})
+     * @Route("/pdffiller/upload_jc", name="pdf_filler_upload_jc", methods={"GET", "POST"})
      */
     public function uploadJc(Request $request): Response
     {
