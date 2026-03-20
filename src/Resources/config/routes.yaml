@@ -1,0 +1,3 @@
+koboldsoft_pdf_filler_bundle:
+    resource: "../../Controller/"
+    type: annotation
