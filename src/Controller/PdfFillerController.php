@@ -77,6 +77,7 @@ class PdfFillerController extends AbstractController
 
         $dpi = 300;
         $lang = 'deu';
+        $relevantPage = 1;
 
         $vomText = $auftrag->getDatumEintritt();
         $bisText = $auftrag->getDatumAustritt();
@@ -127,11 +128,13 @@ class PdfFillerController extends AbstractController
         };
 
         $cmdRender = sprintf(
-            'pdftoppm -f 1 -l 1 -png -r %d %s %s',
+            'pdftoppm -f %d -l %d -png -r %d %s %s',
+            $relevantPage,
+            $relevantPage,
             $dpi,
             escapeshellarg($inputPdf),
             escapeshellarg($prefix)
-        );
+            );
 
         [$renderCode, $renderOut] = $this->pdfOcrFiller->runCmd($cmdRender);
         $this->pdfOcrFiller->must($renderCode === 0, "pdftoppm Fehler:\n" . implode("\n", $renderOut));
@@ -435,7 +438,7 @@ class PdfFillerController extends AbstractController
         $pdf->SetAutoPageBreak(false);
         $pdf->SetMargins(0, 0, 0);
 
-        $tpl = $pdf->importPage(1);
+        $tpl = $pdf->importPage($relevantPage);
         $size = $pdf->getTemplateSize($tpl);
 
         $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
@@ -490,7 +493,7 @@ class PdfFillerController extends AbstractController
     public function uploadJc(Request $request): Response
     {
         if (!$request->isMethod('POST')) {
-            return new Response('Formular per GET aufgerufen.');
+            return new Response('Formular per GET aufgerufen.', 405);
         }
         
         /** @var UploadedFile|null $file */
@@ -499,6 +502,20 @@ class PdfFillerController extends AbstractController
         
         if (!$file instanceof UploadedFile) {
             return new Response('Keine Datei hochgeladen.', 400);
+        }
+        /*
+        dump([
+            'php_version' => PHP_VERSION,
+            'upload_max_filesize' => ini_get('upload_max_filesize'),
+            'php_ini' => php_ini_loaded_file(),
+            'post_max_size' => ini_get('post_max_size'),
+            'memory_limit' => ini_get('memory_limit'),
+            'sapi' => PHP_SAPI,
+        ]);
+        die();
+        */
+        if (!$file->isValid()) {
+            return new Response('Upload fehlgeschlagen: ' . $file->getErrorMessage(), 400);
         }
         
         if ($auftragId === false) {
@@ -522,14 +539,15 @@ class PdfFillerController extends AbstractController
             return new Response('Massnahme nicht gefunden.', 404);
         }
         
+        $toPdf = static function (?string $value): string {
+            $value = (string) $value;
+            $converted = @iconv('UTF-8', 'windows-1252//TRANSLIT', $value);
+            return $converted !== false ? $converted : $value;
+        };
+        
         $firstname = (string) $coach->getFirstname();
         $lastname = (string) $coach->getLastname();
         $phone = (string) $coach->getPhone();
-        
-        $inputPdf = $file->getPathname();
-        
-        $dpi = 300;
-        $lang = 'deu';
         
         $vomText = (string) $auftrag->getDatumEintritt();
         $bisText = (string) $auftrag->getDatumAustritt();
@@ -537,31 +555,20 @@ class PdfFillerController extends AbstractController
         $beginnText = (string) $massnahme->getBeginn();
         $endeText = (string) $massnahme->getEnde();
         
-        $massnahmebezeichnungText = utf8_decode((string) $auftrag->getFMassnahme());
-        $massnahmenummerText = utf8_decode( (string) $auftrag->getFMassnahmenr());
+        $massnahmebezeichnungText = $toPdf((string) $auftrag->getFMassnahme());
+        $massnahmenummerText = $toPdf((string) $auftrag->getFMassnahmenr());
         
-        $nameDesMassnahmetraegersText = utf8_decode('digi.camp SLE GmbH');
-        $anschriftTraegerText = utf8_decode('An der Kolonnade 11, 10117 Berlin');
-        $telefonnummerText = utf8_decode($phone);
-        $zulassungszeitraumText = utf8_decode($beginnText . ' - ' . $endeText);
-        $nameDesAnsprechpartnersText = utf8_decode($firstname . ' ' . $lastname);
+        $nameDesMassnahmetraegersText = $toPdf('digi.camp SLE GmbH');
+        $anschriftTraegerText = $toPdf('An der Kolonnade 11, 10117 Berlin');
+        $telefonnummerText = $toPdf($phone);
+        $zulassungszeitraumText = $toPdf($beginnText . ' - ' . $endeText);
+        $nameDesAnsprechpartnersText = $toPdf($firstname . ' ' . $lastname);
+        $vomPdfText = $toPdf($vomText);
+        $bisPdfText = $toPdf($bisText);
         
-        $this->pdfOcrFiller->must(file_exists($inputPdf), 'Input PDF nicht gefunden: ' . $inputPdf);
-        
-        [$code1, $out1] = $this->pdfOcrFiller->runCmd('command -v pdftoppm');
-        [$code2, $out2] = $this->pdfOcrFiller->runCmd('command -v tesseract');
-        
-        $this->pdfOcrFiller->must($code1 === 0, "pdftoppm nicht gefunden.\n" . implode("\n", $out1));
-        $this->pdfOcrFiller->must($code2 === 0, "tesseract nicht gefunden.\n" . implode("\n", $out2));
-        
-        $tmpDir = sys_get_temp_dir() . '/ocr_' . bin2hex(random_bytes(4));
-        $this->pdfOcrFiller->must(
-            @mkdir($tmpDir, 0777, true) || is_dir($tmpDir),
-            'Kann Temp-Ordner nicht erstellen: ' . $tmpDir
-            );
-        
-        $prefix = $tmpDir . '/page';
-        $pagePng = $tmpDir . '/page-4.png';
+        $dpi = 300;
+        $lang = 'deu';
+        $relevantPage = 1;
         
         $pxToMm = static fn(float $px): float => $px * 25.4 / $dpi;
         
@@ -570,287 +577,307 @@ class PdfFillerController extends AbstractController
             return preg_replace('~[^a-zäöüß0-9]+~u', '', $s) ?? $s;
         };
         
-        $cmdRender = sprintf(
-            'pdftoppm -f 4 -l 4 -png -r %d %s %s',
-            $dpi,
-            escapeshellarg($inputPdf),
-            escapeshellarg($prefix)
-            );
+        $workDir = sys_get_temp_dir() . '/ocr_' . bin2hex(random_bytes(8));
+        $uploadDir = $workDir . '/upload';
         
-        [$renderCode, $renderOut] = $this->pdfOcrFiller->runCmd($cmdRender);
-        $this->pdfOcrFiller->must($renderCode === 0, "pdftoppm Fehler:\n" . implode("\n", $renderOut));
-        $this->pdfOcrFiller->must(file_exists($pagePng), 'Render OK, aber Bild fehlt: ' . $pagePng);
-        
-        $cmdOcr = sprintf(
-            'tesseract %s stdout -l %s tsv',
-            escapeshellarg($pagePng),
-            escapeshellarg($lang)
-            );
-        
-        [$ocrCode, $tsvOut] = $this->pdfOcrFiller->runCmd($cmdOcr);
-        $this->pdfOcrFiller->must($ocrCode === 0, "tesseract Fehler:\n" . implode("\n", $tsvOut));
-        $this->pdfOcrFiller->must(count($tsvOut) > 1, 'tesseract lieferte keine TSV Daten.');
-        
-        array_shift($tsvOut);
-        
-        $found = [
-            'massnahmetraeger' => null,
-            'anschrift' => null,
-            'telefonnummer' => null,
-            'nummer_der_massnahme' => null,
-            'bezeichnung_der_massnahme' => null,
-            'zulassungszeitraum' => null,
-            'beginn_der_teilnahme' => null,
-            'ende_der_teilnahme' => null,
-            'name_des_ansprechpartners' => null,
-        ];
-        
-        foreach ($tsvOut as $i => $row) {
-            $cols = explode("\t", $row);
-            if (count($cols) < 12) {
-                continue;
+        try {
+            if (!mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
+                throw new \RuntimeException('Kann Temp-Ordner nicht erstellen: ' . $uploadDir);
             }
             
-            $text = trim($cols[11] ?? '');
-            if ($text === '') {
-                continue;
-            }
+            $safeFilename = 'input_' . bin2hex(random_bytes(8)) . '.pdf';
+            $storedFile = $file->move($uploadDir, $safeFilename);
+            $inputPdf = $storedFile->getRealPath();
             
-            $box = [
-                'left' => (int) $cols[6],
-                'top' => (int) $cols[7],
-                'width' => (int) $cols[8],
-                'height' => (int) $cols[9],
+            $this->pdfOcrFiller->must(
+                $inputPdf !== false && $inputPdf !== '' && is_file($inputPdf),
+                'Input PDF nicht gefunden: ' . var_export($inputPdf, true)
+                );
+            
+            [$code1, $out1] = $this->pdfOcrFiller->runCmd('command -v pdftoppm');
+            [$code2, $out2] = $this->pdfOcrFiller->runCmd('command -v tesseract');
+            
+            $this->pdfOcrFiller->must($code1 === 0, "pdftoppm nicht gefunden.\n" . implode("\n", $out1));
+            $this->pdfOcrFiller->must($code2 === 0, "tesseract nicht gefunden.\n" . implode("\n", $out2));
+            
+            $prefix = $workDir . '/page';
+            $pagePng = $workDir . '/page-1.png';
+            
+            $cmdRender = sprintf(
+                'pdftoppm -f %d -l %d -png -r %d %s %s',
+                $relevantPage,
+                $relevantPage,
+                $dpi,
+                escapeshellarg($inputPdf),
+                escapeshellarg($prefix)
+                );
+            
+            [$renderCode, $renderOut] = $this->pdfOcrFiller->runCmd($cmdRender);
+            $this->pdfOcrFiller->must($renderCode === 0, "pdftoppm Fehler:\n" . implode("\n", $renderOut));
+            $this->pdfOcrFiller->must(is_file($pagePng), 'Render OK, aber Bild fehlt: ' . $pagePng);
+            
+            $cmdOcr = sprintf(
+                'tesseract %s stdout -l %s tsv',
+                escapeshellarg($pagePng),
+                escapeshellarg($lang)
+                );
+            
+            [$ocrCode, $tsvOut] = $this->pdfOcrFiller->runCmd($cmdOcr);
+            $this->pdfOcrFiller->must($ocrCode === 0, "tesseract Fehler:\n" . implode("\n", $tsvOut));
+            $this->pdfOcrFiller->must(count($tsvOut) > 1, 'tesseract lieferte keine TSV Daten.');
+            
+            array_shift($tsvOut);
+            
+            $found = [
+                'massnahmetraeger' => null,
+                'anschrift' => null,
+                'telefonnummer' => null,
+                'nummer_der_massnahme' => null,
+                'bezeichnung_der_massnahme' => null,
+                'zulassungszeitraum' => null,
+                'beginn_der_teilnahme' => null,
+                'ende_der_teilnahme' => null,
+                'name_des_ansprechpartners' => null,
             ];
             
-            $words = [];
-            for ($j = 0; $j < 6; $j++) {
-                $nextRow = $tsvOut[$i + $j] ?? null;
-                if ($nextRow === null) {
-                    break;
-                }
-                
-                $nextCols = explode("\t", $nextRow);
-                if (count($nextCols) < 12) {
-                    break;
-                }
-                
-                $word = trim($nextCols[11] ?? '');
-                if ($word === '') {
-                    break;
-                }
-                
-                $words[] = $norm($word);
-            }
-            
-            $joined = implode('', $words);
-            $w1 = $words[0] ?? '';
-            
-            if (
-                $found['massnahmetraeger'] === null
-                && (
-                    str_contains($joined, 'maßnahmeträger')
-                    || str_contains($joined, 'massnahmetraeger')
-                    )
-                ) {
-                    $found['massnahmetraeger'] = $box;
+            foreach ($tsvOut as $i => $row) {
+                $cols = explode("\t", $row);
+                if (count($cols) < 12) {
                     continue;
                 }
                 
+                $text = trim($cols[11] ?? '');
+                if ($text === '') {
+                    continue;
+                }
+                
+                $box = [
+                    'left' => (int) $cols[6],
+                    'top' => (int) $cols[7],
+                    'width' => (int) $cols[8],
+                    'height' => (int) $cols[9],
+                ];
+                
+                $words = [];
+                for ($j = 0; $j < 6; $j++) {
+                    $nextRow = $tsvOut[$i + $j] ?? null;
+                    if ($nextRow === null) {
+                        break;
+                    }
+                    
+                    $nextCols = explode("\t", $nextRow);
+                    if (count($nextCols) < 12) {
+                        break;
+                    }
+                    
+                    $word = trim($nextCols[11] ?? '');
+                    if ($word === '') {
+                        break;
+                    }
+                    
+                    $words[] = $norm($word);
+                }
+                
+                $joined = implode('', $words);
+                $w1 = $words[0] ?? '';
+                
                 if (
-                    $found['anschrift'] === null
-                    && $w1 === 'anschrift'
+                    $found['massnahmetraeger'] === null
+                    && (str_contains($joined, 'maßnahmeträger') || str_contains($joined, 'massnahmetraeger'))
                     ) {
+                        $found['massnahmetraeger'] = $box;
+                        continue;
+                    }
+                    
+                    if ($found['anschrift'] === null && $w1 === 'anschrift') {
                         $found['anschrift'] = $box;
                         continue;
                     }
                     
+                    if ($found['telefonnummer'] === null && str_contains($joined, 'telefonnummer')) {
+                        $found['telefonnummer'] = $box;
+                        continue;
+                    }
+                    
                     if (
-                        $found['telefonnummer'] === null
-                        && str_contains($joined, 'telefonnummer')
+                        $found['nummer_der_massnahme'] === null
+                        && (str_contains($joined, 'nummerdermaßnahme') || str_contains($joined, 'nummerdermassnahme'))
                         ) {
-                            $found['telefonnummer'] = $box;
+                            $found['nummer_der_massnahme'] = $box;
                             continue;
                         }
                         
                         if (
-                            $found['nummer_der_massnahme'] === null
-                            && (
-                                str_contains($joined, 'nummerdermaßnahme')
-                                || str_contains($joined, 'nummerdermassnahme')
-                                )
+                            $found['bezeichnung_der_massnahme'] === null
+                            && (str_contains($joined, 'bezeichnungdermaßnahme') || str_contains($joined, 'bezeichnungdermassnahme'))
                             ) {
-                                $found['nummer_der_massnahme'] = $box;
+                                $found['bezeichnung_der_massnahme'] = $box;
+                                continue;
+                            }
+                            
+                            if ($found['zulassungszeitraum'] === null && str_contains($joined, 'zulassungszeitraum')) {
+                                $found['zulassungszeitraum'] = $box;
                                 continue;
                             }
                             
                             if (
-                                $found['bezeichnung_der_massnahme'] === null
-                                && (
-                                    str_contains($joined, 'bezeichnungdermaßnahme')
-                                    || str_contains($joined, 'bezeichnungdermassnahme')
-                                    )
+                                $found['beginn_der_teilnahme'] === null
+                                && (str_contains($joined, 'beginderteilnahme') || str_contains($joined, 'beginnderteilnahme'))
                                 ) {
-                                    $found['bezeichnung_der_massnahme'] = $box;
+                                    $found['beginn_der_teilnahme'] = $box;
+                                    continue;
+                                }
+                                
+                                if ($found['ende_der_teilnahme'] === null && str_contains($joined, 'endederteilnahme')) {
+                                    $found['ende_der_teilnahme'] = $box;
                                     continue;
                                 }
                                 
                                 if (
-                                    $found['zulassungszeitraum'] === null
-                                    && str_contains($joined, 'zulassungszeitraum')
+                                    $found['name_des_ansprechpartners'] === null
+                                    && str_contains($joined, 'namedesansprechpartners')
                                     ) {
-                                        $found['zulassungszeitraum'] = $box;
+                                        $found['name_des_ansprechpartners'] = $box;
                                         continue;
                                     }
                                     
                                     if (
-                                        $found['beginn_der_teilnahme'] === null
-                                        && (
-                                            str_contains($joined, 'beginderteilnahme')
-                                            || str_contains($joined, 'beginnderteilnahme')
-                                            )
+                                        $found['massnahmetraeger']
+                                        && $found['anschrift']
+                                        && $found['telefonnummer']
+                                        && $found['nummer_der_massnahme']
+                                        && $found['bezeichnung_der_massnahme']
+                                        && $found['zulassungszeitraum']
+                                        && $found['beginn_der_teilnahme']
+                                        && $found['ende_der_teilnahme']
+                                        && $found['name_des_ansprechpartners']
                                         ) {
-                                            $found['beginn_der_teilnahme'] = $box;
-                                            continue;
+                                            break;
                                         }
-                                        
-                                        if (
-                                            $found['ende_der_teilnahme'] === null
-                                            && str_contains($joined, 'endederteilnahme')
-                                            ) {
-                                                $found['ende_der_teilnahme'] = $box;
-                                                continue;
-                                            }
-                                            
-                                            if (
-                                                $found['name_des_ansprechpartners'] === null
-                                                && str_contains($joined, 'namedesansprechpartners')
-                                                ) {
-                                                    $found['name_des_ansprechpartners'] = $box;
-                                                    continue;
-                                                }
-                                                
-                                                if (
-                                                    $found['massnahmetraeger']
-                                                    && $found['anschrift']
-                                                    && $found['telefonnummer']
-                                                    && $found['nummer_der_massnahme']
-                                                    && $found['bezeichnung_der_massnahme']
-                                                    && $found['zulassungszeitraum']
-                                                    && $found['beginn_der_teilnahme']
-                                                    && $found['ende_der_teilnahme']
-                                                    && $found['name_des_ansprechpartners']
-                                                    ) {
-                                                        break;
-                                                    }
-        }
-        
-        $foundMassnahmetraeger = $found['massnahmetraeger'];
-        $foundAnschrift = $found['anschrift'];
-        $foundTelefonnummer = $found['telefonnummer'];
-        $foundNummerDerMassnahme = $found['nummer_der_massnahme'];
-        $foundBezeichnungDerMassnahme = $found['bezeichnung_der_massnahme'];
-        $foundZulassungszeitraum = $found['zulassungszeitraum'];
-        $foundBeginnDerTeilnahme = $found['beginn_der_teilnahme'];
-        $foundEndeDerTeilnahme = $found['ende_der_teilnahme'];
-        $foundNameDesAnsprechpartners = $found['name_des_ansprechpartners'];
-        
-        $this->pdfOcrFiller->must($foundMassnahmetraeger !== null, "Feld 'Maßnahmeträger' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundAnschrift !== null, "Feld 'Anschrift' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundTelefonnummer !== null, "Feld 'Telefonnummer' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundNummerDerMassnahme !== null, "Feld 'Nummer der Maßnahme' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundBezeichnungDerMassnahme !== null, "Feld 'Bezeichnung der Maßnahme' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundZulassungszeitraum !== null, "Feld 'Zulassungszeitraum' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundBeginnDerTeilnahme !== null, "Feld 'Beginn der Teilnahme' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundEndeDerTeilnahme !== null, "Feld 'Ende der Teilnahme' wurde nicht erkannt.");
-        $this->pdfOcrFiller->must($foundNameDesAnsprechpartners !== null, "Feld 'Name des Ansprechpartners' wurde nicht erkannt.");
-        
-        $offsetAfterWordPx = 120;
-        $baselineAdjustPx = 10;
-        
-        $mmXMassnahmetraeger = $pxToMm($foundMassnahmetraeger['left'] + $foundMassnahmetraeger['width'] + $offsetAfterWordPx + 150);
-        $mmYMassnahmetraeger = $pxToMm($foundMassnahmetraeger['top'] + $baselineAdjustPx);
-        
-        $mmXAnschrift = $pxToMm($foundAnschrift['left'] + $foundAnschrift['width'] + $offsetAfterWordPx + 310);
-        $mmYAnschrift = $pxToMm($foundAnschrift['top'] + $baselineAdjustPx);
-        
-        $mmXTelefonnummer = $pxToMm($foundTelefonnummer['left'] + $foundTelefonnummer['width'] + $offsetAfterWordPx + 178);
-        $mmYTelefonnummer = $pxToMm($foundTelefonnummer['top'] + $baselineAdjustPx);
-        
-        $mmXNummerDerMassnahme = $pxToMm($foundNummerDerMassnahme['left'] + $foundNummerDerMassnahme['width'] + $offsetAfterWordPx + 320);
-        $mmYNummerDerMassnahme = $pxToMm($foundNummerDerMassnahme['top'] + $baselineAdjustPx);
-        
-        $mmXBezeichnungDerMassnahme = $pxToMm($foundBezeichnungDerMassnahme['left'] + $foundBezeichnungDerMassnahme['width'] + $offsetAfterWordPx + 245);
-        $mmYBezeichnungDerMassnahme = $pxToMm($foundBezeichnungDerMassnahme['top'] + $baselineAdjustPx);
-        
-        $mmXZulassungszeitraum = $pxToMm($foundZulassungszeitraum['left'] + $foundZulassungszeitraum['width'] + $offsetAfterWordPx + 97);
-        $mmYZulassungszeitraum = $pxToMm($foundZulassungszeitraum['top'] + $baselineAdjustPx);
-        
-        $mmXBeginnDerTeilnahme = $pxToMm($foundBeginnDerTeilnahme['left'] + $foundBeginnDerTeilnahme['width'] + $offsetAfterWordPx + 350);
-        $mmYBeginnDerTeilnahme = $pxToMm($foundBeginnDerTeilnahme['top'] + $baselineAdjustPx);
-        
-        $mmXEndeDerTeilnahme = $pxToMm($foundEndeDerTeilnahme['left'] + $foundEndeDerTeilnahme['width'] + $offsetAfterWordPx + 380);
-        $mmYEndeDerTeilnahme = $pxToMm($foundEndeDerTeilnahme['top'] + $baselineAdjustPx);
-        
-        $mmXNameDesAnsprechpartners = $pxToMm($foundNameDesAnsprechpartners['left'] + $foundNameDesAnsprechpartners['width'] + $offsetAfterWordPx + 370);
-        $mmYNameDesAnsprechpartners = $pxToMm($foundNameDesAnsprechpartners['top'] + $baselineAdjustPx);
-        
-        $pdf = new Fpdi();
-        
-        try {
-            $pdf->setSourceFile($inputPdf);
+            }
+            
+            $this->pdfOcrFiller->must($found['massnahmetraeger'] !== null, "Feld 'Maßnahmeträger' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['anschrift'] !== null, "Feld 'Anschrift' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['telefonnummer'] !== null, "Feld 'Telefonnummer' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['nummer_der_massnahme'] !== null, "Feld 'Nummer der Maßnahme' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['bezeichnung_der_massnahme'] !== null, "Feld 'Bezeichnung der Maßnahme' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['zulassungszeitraum'] !== null, "Feld 'Zulassungszeitraum' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['beginn_der_teilnahme'] !== null, "Feld 'Beginn der Teilnahme' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['ende_der_teilnahme'] !== null, "Feld 'Ende der Teilnahme' wurde nicht erkannt.");
+            $this->pdfOcrFiller->must($found['name_des_ansprechpartners'] !== null, "Feld 'Name des Ansprechpartners' wurde nicht erkannt.");
+            
+            $offsetAfterWordPx = 120;
+            $baselineAdjustPx = 10;
+            
+            $mmXMassnahmetraeger = $pxToMm($found['massnahmetraeger']['left'] + $found['massnahmetraeger']['width'] + $offsetAfterWordPx + 150);
+            $mmYMassnahmetraeger = $pxToMm($found['massnahmetraeger']['top'] + $baselineAdjustPx);
+            
+            $mmXAnschrift = $pxToMm($found['anschrift']['left'] + $found['anschrift']['width'] + $offsetAfterWordPx + 310);
+            $mmYAnschrift = $pxToMm($found['anschrift']['top'] + $baselineAdjustPx);
+            
+            $mmXTelefonnummer = $pxToMm($found['telefonnummer']['left'] + $found['telefonnummer']['width'] + $offsetAfterWordPx + 178);
+            $mmYTelefonnummer = $pxToMm($found['telefonnummer']['top'] + $baselineAdjustPx);
+            
+            $mmXNummerDerMassnahme = $pxToMm($found['nummer_der_massnahme']['left'] + $found['nummer_der_massnahme']['width'] + $offsetAfterWordPx + 320);
+            $mmYNummerDerMassnahme = $pxToMm($found['nummer_der_massnahme']['top'] + $baselineAdjustPx);
+            
+            $mmXBezeichnungDerMassnahme = $pxToMm($found['bezeichnung_der_massnahme']['left'] + $found['bezeichnung_der_massnahme']['width'] + $offsetAfterWordPx + 245);
+            $mmYBezeichnungDerMassnahme = $pxToMm($found['bezeichnung_der_massnahme']['top'] + $baselineAdjustPx);
+            
+            $mmXZulassungszeitraum = $pxToMm($found['zulassungszeitraum']['left'] + $found['zulassungszeitraum']['width'] + $offsetAfterWordPx + 97);
+            $mmYZulassungszeitraum = $pxToMm($found['zulassungszeitraum']['top'] + $baselineAdjustPx);
+            
+            $mmXBeginnDerTeilnahme = $pxToMm($found['beginn_der_teilnahme']['left'] + $found['beginn_der_teilnahme']['width'] + $offsetAfterWordPx + 350);
+            $mmYBeginnDerTeilnahme = $pxToMm($found['beginn_der_teilnahme']['top'] + $baselineAdjustPx);
+            
+            $mmXEndeDerTeilnahme = $pxToMm($found['ende_der_teilnahme']['left'] + $found['ende_der_teilnahme']['width'] + $offsetAfterWordPx + 380);
+            $mmYEndeDerTeilnahme = $pxToMm($found['ende_der_teilnahme']['top'] + $baselineAdjustPx);
+            
+            $mmXNameDesAnsprechpartners = $pxToMm($found['name_des_ansprechpartners']['left'] + $found['name_des_ansprechpartners']['width'] + $offsetAfterWordPx + 370);
+            $mmYNameDesAnsprechpartners = $pxToMm($found['name_des_ansprechpartners']['top'] + $baselineAdjustPx);
+            
+            $pdf = new Fpdi();
+            
+            try {
+                $pdf->setSourceFile($inputPdf);
+            } catch (\Throwable $e) {
+                $clean = $this->pdfOcrFiller->makeCleanPdf($inputPdf);
+                $pdf->setSourceFile($clean);
+            }
+            
+            $pdf->SetAutoPageBreak(false);
+            $pdf->SetMargins(0, 0, 0);
+            $pdf->SetFont('Helvetica', '', 10);
+            $pdf->SetTextColor(0, 0, 0);
+            
+            $tpl = $pdf->importPage($relevantPage);
+            $size = $pdf->getTemplateSize($tpl);
+            
+            $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+            $pdf->useTemplate($tpl, 0, 0, $size['width'], $size['height']);
+            
+            $pdf->SetXY($mmXMassnahmetraeger + 4, $mmYMassnahmetraeger - 3);
+            $pdf->Cell(120, 6, $nameDesMassnahmetraegersText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXAnschrift + 4, $mmYAnschrift - 3);
+            $pdf->MultiCell(120, 5, $anschriftTraegerText, 0, 'L');
+            
+            // Falls du die Telefonnummer separat doch wieder setzen willst:
+            // $pdf->SetXY($mmXTelefonnummer + 4, $mmYTelefonnummer - 3);
+            // $pdf->Cell(80, 6, $telefonnummerText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXNummerDerMassnahme + 4, $mmYNummerDerMassnahme - 3);
+            $pdf->Cell(80, 6, $massnahmenummerText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXBezeichnungDerMassnahme + 4, $mmYBezeichnungDerMassnahme - 3);
+            $pdf->Cell(120, 6, $massnahmebezeichnungText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXZulassungszeitraum + 4, $mmYZulassungszeitraum - 3);
+            $pdf->Cell(80, 6, $zulassungszeitraumText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXBeginnDerTeilnahme + 4, $mmYBeginnDerTeilnahme - 3);
+            $pdf->Cell(80, 6, $vomPdfText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXEndeDerTeilnahme + 4, $mmYEndeDerTeilnahme - 3);
+            $pdf->Cell(80, 6, $bisPdfText, 0, 0, 'L');
+            
+            $pdf->SetXY($mmXNameDesAnsprechpartners + 4, $mmYNameDesAnsprechpartners - 3);
+            $pdf->Cell(
+                120,
+                6,
+                $nameDesAnsprechpartnersText . ', Tel.: ' . $telefonnummerText,
+                0,
+                0,
+                'L'
+                );
+            
+            return new Response(
+                $pdf->Output('S'),
+                200,
+                [
+                    'Content-Type' => 'application/pdf',
+                    'Content-Disposition' => 'inline; filename="filled.pdf"',
+                ]
+                );
         } catch (\Throwable $e) {
-            $clean = $this->pdfOcrFiller->makeCleanPdf($inputPdf);
-            $pdf->setSourceFile($clean);
+            return new Response('Fehler beim Verarbeiten der PDF: ' . $e->getMessage(), 500);
+        } finally {
+            if (isset($workDir) && is_dir($workDir)) {
+                $iterator = new \RecursiveIteratorIterator(
+                    new \RecursiveDirectoryIterator($workDir, \FilesystemIterator::SKIP_DOTS),
+                    \RecursiveIteratorIterator::CHILD_FIRST
+                    );
+                
+                foreach ($iterator as $item) {
+                    if ($item->isDir()) {
+                        @rmdir($item->getPathname());
+                    } else {
+                        @unlink($item->getPathname());
+                    }
+                }
+                
+                @rmdir($workDir);
+            }
         }
-        
-        $pdf->SetAutoPageBreak(false);
-        $pdf->SetMargins(0, 0, 0);
-        $pdf->SetFont('Helvetica', '', 10);
-        $pdf->SetTextColor(0, 0, 0);
-        
-        $tpl = $pdf->importPage(4);
-        $size = $pdf->getTemplateSize($tpl);
-        
-        $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
-        $pdf->useTemplate($tpl, 0, 0, $size['width'], $size['height']);
-        
-        $pdf->SetXY($mmXMassnahmetraeger + 4, $mmYMassnahmetraeger - 3);
-        $pdf->Cell(120, 6, $nameDesMassnahmetraegersText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXAnschrift + 4, $mmYAnschrift - 3);
-        $pdf->MultiCell(120, 5, $anschriftTraegerText, 0, 'L');
-        
-        /*
-        $pdf->SetXY($mmXTelefonnummer + 4, $mmYTelefonnummer - 3);
-        $pdf->Cell(80, 6, $telefonnummerText, 0, 0, 'L');
-        */
-        
-        $pdf->SetXY($mmXNummerDerMassnahme + 4, $mmYNummerDerMassnahme - 3);
-        $pdf->Cell(80, 6, $massnahmenummerText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXBezeichnungDerMassnahme + 4, $mmYBezeichnungDerMassnahme - 3);
-        $pdf->Cell(120, 6, $massnahmebezeichnungText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXZulassungszeitraum + 4, $mmYZulassungszeitraum - 3);
-        $pdf->Cell(80, 6, $zulassungszeitraumText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXBeginnDerTeilnahme + 4, $mmYBeginnDerTeilnahme - 3);
-        $pdf->Cell(80, 6, $vomText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXEndeDerTeilnahme + 4, $mmYEndeDerTeilnahme - 3);
-        $pdf->Cell(80, 6, $bisText, 0, 0, 'L');
-        
-        $pdf->SetXY($mmXNameDesAnsprechpartners + 4, $mmYNameDesAnsprechpartners - 3);
-        $pdf->Cell(120, 6, $nameDesAnsprechpartnersText.', Tel.: '.$telefonnummerText, 0, 0, 'L');
-        
-        return new Response(
-            $pdf->Output('S'),
-            200,
-            [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'inline; filename="filled.pdf"',
-            ]
-            );
     }
 }
