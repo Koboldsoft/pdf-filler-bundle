@@ -181,7 +181,7 @@ class PdfOcrFiller
             'massnahmebezeichnung' => utf8_decode((string) $auftrag->getFMassnahme()),
             'massnahmenummer' => utf8_decode(str_replace('/', '     ', (string) $auftrag->getFMassnahmenr())),
             'name_des_massnahmetraegers' => utf8_decode('digi.camp SLE GmbH'),
-            'anschrift_traeger' => utf8_decode('An der Kolonnade 11, 10117 Berlin'),
+            'anschrift_traeger' => utf8_decode('Boxhagener Straße 77-78, 10245 Berlin'),
             'name_telefon_ansprechpartner' => $ansprechpartner,
             'ort_und_datum' => utf8_decode('Berlin, ' . date('d.m.Y')),
         ];
@@ -208,7 +208,7 @@ class PdfOcrFiller
 
         return [
             'massnahmetraeger' => $toPdf('digi.camp SLE GmbH'),
-            'anschrift' => $toPdf('An der Kolonnade 11, 10117 Berlin'),
+            'anschrift' => $toPdf('Boxhagener Straße 77-78, 10245 Berlin'),
             'telefonnummer' => $toPdf('030 629346927'),
             'nummer_der_massnahme' => $toPdf((string) $auftrag->getFMassnahmenr()),
             'bezeichnung_der_massnahme' => $toPdf((string) $auftrag->getFMassnahme()),
