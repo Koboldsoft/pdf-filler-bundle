@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Koboldsoft\PdfFillerBundle\Controller;
 
+use Doctrine\DBAL\Connection;
 use Koboldsoft\PdfFillerBundle\Repository\MmAuftragRepository;
 use Koboldsoft\PdfFillerBundle\Repository\MmMassnahmeRepository;
 use Koboldsoft\PdfFillerBundle\Repository\TlMemberRepository;
@@ -19,17 +20,20 @@ class PdfFillerController extends AbstractController
     private MmAuftragRepository $auftragRepo;
     private TlMemberRepository $memberRepo;
     private MmMassnahmeRepository $massnahmeRepo;
+    private Connection $connection;
 
     public function __construct(
         PdfOcrFiller $pdfOcrFiller,
         MmAuftragRepository $auftragRepo,
         TlMemberRepository $memberRepo,
-        MmMassnahmeRepository $massnahmeRepo
+        MmMassnahmeRepository $massnahmeRepo,
+        Connection $connection
     ) {
         $this->pdfOcrFiller = $pdfOcrFiller;
         $this->auftragRepo = $auftragRepo;
         $this->memberRepo = $memberRepo;
         $this->massnahmeRepo = $massnahmeRepo;
+        $this->connection = $connection;
     }
 
     /**
@@ -68,6 +72,11 @@ class PdfFillerController extends AbstractController
                 $loaded['coach'],
                 $loaded['massnahme']
             );
+            $standortId = $this->connection->fetchOne(
+                'SELECT id_standort FROM mm_auftrag WHERE id = ?',
+                [$auftragId]
+            );
+            $values['massnahmeort'] = $this->getFormattedStandort($this->connection, $standortId);
 
             $pdfContent = $this->pdfOcrFiller->fillAfaPdf($file, $values);
 
@@ -116,6 +125,11 @@ class PdfFillerController extends AbstractController
                 $loaded['coach'],
                 $loaded['massnahme']
             );
+            $standortId = $this->connection->fetchOne(
+                'SELECT id_standort FROM mm_auftrag WHERE id = ?',
+                [$auftragId]
+            );
+            $values['durchfuehrungsort'] = $this->getFormattedStandort($this->connection, $standortId);
 
             $pdfContent = $this->pdfOcrFiller->fillJcPdf($file, $values);
 
@@ -153,5 +167,42 @@ class PdfFillerController extends AbstractController
             'coach' => $coach,
             'massnahme' => $massnahme,
         ];
+    }
+
+    private function getFormattedStandort(Connection $connection, $standortId): string
+    {
+        if ($standortId === null) {
+            return '';
+        }
+
+        $standortId = trim((string) $standortId);
+        if ($standortId === '' || ! ctype_digit($standortId) || (int) $standortId === 0) {
+            return '';
+        }
+
+        try {
+            $standort = $connection->fetchAssociative(
+                'SELECT plz, ort, strasse FROM mm_standort WHERE id = ?',
+                [(int) $standortId]
+            );
+        } catch (\Throwable $e) {
+            return '';
+        }
+
+        if (! is_array($standort)) {
+            return '';
+        }
+
+        $plz = trim((string) ($standort['plz'] ?? ''));
+        $ort = trim((string) ($standort['ort'] ?? ''));
+        $strasse = trim((string) ($standort['strasse'] ?? ''));
+
+        $plzOrt = trim(implode(' ', array_filter([$plz, $ort], static function (string $value): bool {
+            return $value !== '';
+        })));
+
+        return implode(', ', array_filter([$plzOrt, $strasse], static function (string $value): bool {
+            return $value !== '';
+        }));
     }
 }

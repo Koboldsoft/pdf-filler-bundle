@@ -293,6 +293,7 @@ class PdfOcrFiller
             'ende' => null,
             'massnahmebezeichnung' => null,
             'massnahmenummer' => null,
+            'massnahmeort' => null,
             'name_des_massnahmetraegers' => null,
             'anschrift_traeger' => null,
             'ansprechpartner_beim_traeger' => null,
@@ -348,6 +349,13 @@ class PdfOcrFiller
                 'massnahmenummer',
             ])) {
                 $found['massnahmenummer'] = $box;
+            }
+
+            if ($found['massnahmeort'] === null && $this->hasAnyNeedle($n, [
+                'maßnahmeort',
+                'massnahmeort',
+            ])) {
+                $found['massnahmeort'] = $box;
             }
 
             if ($found['name_des_massnahmetraegers'] === null) {
@@ -436,6 +444,7 @@ class PdfOcrFiller
                 $found['ende'] &&
                 $found['massnahmebezeichnung'] &&
                 $found['massnahmenummer'] &&
+                $found['massnahmeort'] &&
                 $found['anschrift_traeger'] &&
                 $found['ansprechpartner_beim_traeger'] &&
                 $found['name_telefon_ansprechpartner']
@@ -502,6 +511,7 @@ class PdfOcrFiller
             'zulassungszeitraum' => null,
             'beginn_der_teilnahme' => null,
             'ende_der_teilnahme' => null,
+            'durchfuehrungsort' => null,
             'name_des_ansprechpartners' => null,
             'teilnahme_am_modul' => null,
             'genauere_beschreibung' => null,
@@ -605,6 +615,15 @@ class PdfOcrFiller
                 continue;
             }
 
+            if ($found['durchfuehrungsort'] === null && (
+                str_contains($joined, 'durchführungsort')
+                || str_contains($joined, 'durchfuehrungsort')
+                || str_contains($joined, 'durchfuhrungsort')
+            )) {
+                $found['durchfuehrungsort'] = $box;
+                continue;
+            }
+
             if ($found['genauere_beschreibung'] === null && (
                 str_contains($joined, 'ggfgenauerebeschreibung')
                 || str_contains($joined, 'genauerebeschreibung')
@@ -628,6 +647,7 @@ class PdfOcrFiller
                 $found['beginn_der_teilnahme'] !== null &&
                 $found['teilnahme_am_modul'] !== null &&
                 $found['ende_der_teilnahme'] !== null &&
+                $found['durchfuehrungsort'] !== null &&
                 $found['genauere_beschreibung'] !== null &&
                 $found['name_des_ansprechpartners'] !== null
             ) {
@@ -680,6 +700,13 @@ class PdfOcrFiller
         $mmXMassnahmenummer = $pxToMm($found['massnahmenummer']['left'] + $found['massnahmenummer']['width'] + $offsetAfterWordPx);
         $mmYMassnahmenummer = $pxToMm($found['massnahmenummer']['top'] + $baselineAdjustPx);
 
+        $mmXMassnahmeort = null;
+        $mmYMassnahmeort = null;
+        if ($found['massnahmeort'] !== null) {
+            $mmXMassnahmeort = $pxToMm($found['massnahmeort']['left'] + $found['massnahmeort']['width'] + $offsetAfterWordPx);
+            $mmYMassnahmeort = $pxToMm($found['massnahmeort']['top'] + $baselineAdjustPx);
+        }
+
         $mmXNameDesMassnahmetraegers = $pxToMm($found['name_des_massnahmetraegers']['left'] - 20);
         $mmYNameDesMassnahmetraegers = $pxToMm($found['name_des_massnahmetraegers']['top'] - 80);
 
@@ -730,6 +757,11 @@ class PdfOcrFiller
 
         $pdf->SetXY($mmXMassnahmenummer + 18, $mmYMassnahmenummer - 3);
         $pdf->Cell(38, 6, $values['massnahmenummer'], 0, 0, 'L');
+
+        if ($mmXMassnahmeort !== null && $mmYMassnahmeort !== null && ($values['massnahmeort'] ?? '') !== '') {
+            $pdf->SetXY($mmXMassnahmeort - 33, $mmYMassnahmeort + 7);
+            $pdf->Cell(100, 6, $values['massnahmeort'], 0, 0, 'L');
+        }
 
         $pdf->SetXY($mmXNameDesMassnahmetraegers, $mmYNameDesMassnahmetraegers);
         $pdf->Cell(150, 6, $values['name_des_massnahmetraegers'], 0, 0, 'L');
@@ -785,6 +817,13 @@ class PdfOcrFiller
         $mmXEndeDerTeilnahme = $pxToMm($found['ende_der_teilnahme']['left'] + $found['ende_der_teilnahme']['width'] + $offsetAfterWordPx + 380);
         $mmYEndeDerTeilnahme = $pxToMm($found['ende_der_teilnahme']['top'] + $baselineAdjustPx);
 
+        $mmXDurchfuehrungsort = null;
+        $mmYDurchfuehrungsort = null;
+        if ($found['durchfuehrungsort'] !== null) {
+            $mmXDurchfuehrungsort = $pxToMm($found['durchfuehrungsort']['left'] + $found['durchfuehrungsort']['width'] + $offsetAfterWordPx + 240);
+            $mmYDurchfuehrungsort = $pxToMm($found['durchfuehrungsort']['top'] + $baselineAdjustPx);
+        }
+
         $mmXGenauereBeschreibung = $pxToMm(
             $found['genauere_beschreibung']['left']
             + $found['genauere_beschreibung']['width']
@@ -839,6 +878,11 @@ class PdfOcrFiller
 
         $pdf->SetXY($mmXEndeDerTeilnahme + 4, $mmYEndeDerTeilnahme - 3);
         $pdf->Cell(80, 6, $values['ende_der_teilnahme'], 0, 0, 'L');
+
+        if ($mmXDurchfuehrungsort !== null && $mmYDurchfuehrungsort !== null && ($values['durchfuehrungsort'] ?? '') !== '') {
+            $pdf->SetXY($mmXDurchfuehrungsort - 3, $mmYDurchfuehrungsort - 3);
+            $pdf->Cell(120, 6, $values['durchfuehrungsort'], 0, 0, 'L');
+        }
 
         $pdf->SetXY($mmXTeilnahmeAmModul + 4, $mmYTeilnahmeAmModul - 3);
         $pdf->Cell(120, 6, $values['teilnahme_am_modul'], 0, 0, 'L');
