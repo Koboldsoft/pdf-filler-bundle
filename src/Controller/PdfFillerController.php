@@ -76,7 +76,11 @@ class PdfFillerController extends AbstractController
                 'SELECT id_standort FROM mm_auftrag WHERE id = ?',
                 [$auftragId]
             );
-            $values['massnahmeort'] = $this->getFormattedStandort($this->connection, $standortId);
+            $massnahmeort = $this->getFormattedStandort($this->connection, $standortId);
+            $encodedMassnahmeort = @iconv('UTF-8', 'windows-1252//TRANSLIT', $massnahmeort);
+            $values['massnahmeort'] = $encodedMassnahmeort !== false
+                ? $encodedMassnahmeort
+                : $massnahmeort;
 
             $pdfContent = $this->pdfOcrFiller->fillAfaPdf($file, $values);
 
